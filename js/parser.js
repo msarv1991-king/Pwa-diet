@@ -1,6 +1,6 @@
 /*
  * تبدیل متن آزاد فارسی به لیست غذا + مقدار
- * مثال: «۵ عدد سفیده تخم مرغ یک عدد زرده، یک اسکوپ وی، ۸ قاشق برنج»
+ * مثال: «۵ عدد سفیده تخم مرغ یک عدد زرده، یک اسکوپ وی، ساندویچ سیب زمینی با کمی روغن»
  */
 const Parser = (() => {
   const NUM_WORDS = {
@@ -14,14 +14,28 @@ const Parser = (() => {
     'نیم': 0.5, 'نصف': 0.5, 'نصفه': 0.5, 'نیمه': 0.5, 'ربع': 0.25,
   };
 
+  // کلمات مقدار تقریبی → ضریب (برای چربی/شکر/سس: «کمی» ≈ یک قاشق چایخوری)
+  const AMOUNT_WORDS = {
+    'کمی': 'little', 'یکم': 'little', 'یکمی': 'little', 'کم': 'little', 'اندکی': 'little', 'مختصر': 'little',
+    'ذره': 'tiny', 'یذره': 'tiny', 'خورده': 'tiny',
+    'زیاد': 'lot', 'زیادی': 'lot', 'حسابی': 'lot', 'مفصل': 'lot',
+    'دوبل': 'double',
+  };
+  const AMOUNT_FACTOR = { little: 0.5, tiny: 0.25, lot: 1.5, double: 2 };
+
   // کلمات بی‌اهمیت که نباید «غذای ناشناخته» حساب شوند
   const STOP = new Set([
-    'خوردم', 'خوردیم', 'خورده', 'خوردن', 'میخورم', 'هم', 'حدود', 'تقریبا', 'حدودا', 'کمی', 'یکم', 'یکمی', 'کم', 'زیاد',
-    'را', 'رو', 'از', 'به', 'در', 'یا', 'که', 'ی', 'اینجوری', 'مثلا', 'بود', 'هست', 'است', 'شد',
+    'خوردم', 'خوردیم', 'خورده', 'خوردن', 'میخورم', 'هم', 'حدود', 'تقریبا', 'حدودا',
+    'را', 'رو', 'از', 'به', 'در', 'یا', 'که', 'ی', 'اینجوری', 'مثلا', 'بود', 'هست', 'است', 'شد', 'بدون',
     'صبحانه', 'صبونه', 'ناهار', 'نهار', 'شام', 'میان', 'وعده', 'میانوعده', 'عصرانه', 'بعد', 'قبل', 'تمرین', 'باشگاه',
-    'پخته', 'آبپز', 'ابپز', 'گریل', 'کبابی', 'بخارپز', 'خام', 'سرخ', 'کرده', 'شده', 'تازه', 'ساده', 'خانگی', 'معمولی',
-    'بزرگ', 'کوچیک', 'کوچک', 'متوسط', 'پر', 'سرپر', 'لب', 'کامل', 'خالی', 'تنها', 'فقط', 'دیگه', 'دیگر', 'اضافه',
+    'پخته', 'آبپز', 'ابپز', 'گریل', 'کبابی', 'بخارپز', 'خام', 'سرخ', 'کرده', 'شده', 'تازه', 'ساده', 'خانگی', 'خونگی', 'معمولی',
+    'بزرگ', 'کوچیک', 'کوچک', 'متوسط', 'پر', 'سرپر', 'لب', 'کامل', 'خالی', 'تنها', 'فقط', 'دیگه', 'دیگر', 'اضافه', 'خیلی',
+    'تفت', 'داده', 'سرخکرده', 'رستوران', 'بیرون', 'مامان', 'درست', 'خودم', 'یکی', 'دونه',
   ]);
+
+  // اگر این کلمات بیاید و غذا خودش سرخ‌کردنی نباشد، روغن جذب‌شده اضافه می‌شود
+  const FRIED_WORDS = ['سرخ', 'سرخکرده', 'تفت', 'سوخاری'];
+  const FRIED_FOOD_RE = /سرخ|سوخاری|نیمرو|فلافل|چیپس|پفک|ناگت|تهدیگ|ته دیگ|کوکو|کتلت|روغن|سیب زمینی سرخ/;
 
   const SEPARATORS = new Set(['و', 'با', '+', ',', '،', '؛', ';', '.', '-', '|']);
 
@@ -50,16 +64,23 @@ const Parser = (() => {
   let unitMap = new Map();    // نام نرمال‌شده واحد → واحد استاندارد
   let maxUnitLen = 1;
   let foods = [];
+  let byName = new Map();
 
   function build(customFoods) {
-    aliasMap = new Map(); maxAliasLen = 1; foods = [];
+    aliasMap = new Map(); maxAliasLen = 1; foods = []; byName = new Map();
+    const setAlias = (k, food) => {
+      if (!k) return;
+      if (!aliasMap.has(k) || food.custom) aliasMap.set(k, food);
+      maxAliasLen = Math.max(maxAliasLen, k.split(' ').length);
+    };
     const add = (food) => {
       foods.push(food);
+      byName.set(food.name, food);
       for (const a of food.aliases) {
         const k = norm(a);
-        if (!k) continue;
-        if (!aliasMap.has(k) || food.custom) aliasMap.set(k, food);
-        maxAliasLen = Math.max(maxAliasLen, k.split(' ').length);
+        setAlias(k, food);
+        // «سیبزمینی»، «تخممرغ»، «سینهمرغ»: نسخه بدون فاصله هم شناخته شود
+        if (k.includes(' ')) { const j = k.replace(/ /g, ''); if (j.length >= 5 && !aliasMap.has(j)) setAlias(j, food); }
       }
     };
     // غذاهای شخصی اول، تا اگر هم‌نام بودند اولویت داشته باشند
@@ -68,6 +89,22 @@ const Parser = (() => {
       const aliases = r[0].split('|');
       const sug = SUGAR_FREE_FOODS.has(aliases[0]) ? 0 : r[6];
       add({ id: aliases[0], name: aliases[0], aliases, n: { kcal: r[1], p: r[2], c: r[3], f: r[4], fib: r[5], sug }, u: r[7], d: r[8] });
+    }
+    // غذاهای ترکیبی از روی دستور تهیه حساب می‌شوند
+    for (const [names, unit, parts] of RECIPES) {
+      const aliases = names.split('|');
+      const n = { kcal: 0, p: 0, c: 0, f: 0, fib: 0, sug: 0 };
+      let w = 0;
+      const desc = [];
+      for (const [fname, g] of parts) {
+        const f = byName.get(fname);
+        if (!f) { console.warn('recipe part missing', fname); continue; }
+        for (const k in n) n[k] += f.n[k] * g / 100;
+        w += g;
+        desc.push(`${fname} ${Math.round(g).toLocaleString('fa-IR')} گرم`);
+      }
+      for (const k in n) n[k] = n[k] * 100 / w;
+      add({ id: aliases[0], name: aliases[0], aliases, n, u: { [unit]: w, 'عدد': w, 'پرس': w }, d: unit, recipe: desc.join(' + ') });
     }
     unitMap = new Map(); maxUnitLen = 1;
     for (const [canon, list] of Object.entries(UNIT_ALIASES)) {
@@ -90,13 +127,16 @@ const Parser = (() => {
   }
 
   function tokenize(line) {
-    const raw = (' ' + norm(line) + ' ').replace(/ سی ?سی /g, ' cc ').split(' ').filter(Boolean);
+    const raw = (' ' + norm(line) + ' ')
+      .replace(/ سی ?سی /g, ' cc ')
+      .replace(/ یه (کم|کمی|ذره|خورده) /g, ' $1 ').replace(/ یک (کم|کمی|ذره|خورده) /g, ' $1 ')
+      .replace(/ خیلی کم /g, ' ذره ')
+      .split(' ').filter(Boolean);
     const out = [];
     for (let i = 0; i < raw.length; i++) {
       const t = raw[i];
       let n = parseNumToken(t);
       if (n !== null) {
-        // «دوتا» → عدد + واحد «تا»
         const hadTa = !/^\d/.test(t) && /(تا|تایی)$/.test(t) && !(t in NUM_WORDS);
         // اعداد ترکیبی: «بیست و پنج»، «یک و نیم»، «صد و بیست»
         while (raw[i + 1] === 'و' && i + 2 < raw.length) {
@@ -104,22 +144,20 @@ const Parser = (() => {
           if (n2 === null || n2 >= n) break;
           n += n2; i += 2;
         }
-        // «دو تا سه» → میانگین
         out.push({ n });
         if (hadTa) out.push({ w: 'تا' });
         continue;
       }
       out.push({ w: t });
     }
-    // «هزار» به‌عنوان ضریب: «دو هزار» (نادر ولی ممکن)
     return out;
   }
 
-  // ── شکستن متن به بخش‌های جدا (هر بخش = یک غذا)
+  // ── شکستن متن به بخش‌های جدا
   function segmentize(tokens) {
     const segs = [];
     let cur = [];
-    const hasWord = (seg) => seg.some(t => t.w && !STOP.has(t.w) && !unitMap.has(t.w));
+    const hasWord = (seg) => seg.some(t => t.w && !STOP.has(t.w) && !unitMap.has(t.w) && !(t.w in AMOUNT_WORDS));
     for (const t of tokens) {
       if (t.w && SEPARATORS.has(t.w)) { if (cur.length) segs.push(cur); cur = []; continue; }
       if (t.n !== undefined && hasWord(cur)) { segs.push(cur); cur = []; }
@@ -129,7 +167,6 @@ const Parser = (() => {
     return segs;
   }
 
-  // پیدا کردن طولانی‌ترین تطابق در فهرست
   function findLongest(words, map, maxLen) {
     let best = null;
     for (let i = 0; i < words.length; i++) {
@@ -172,44 +209,46 @@ const Parser = (() => {
     return best;
   }
 
-  function stripSuffix(w) {
-    return w.replace(/(های|ها|هایی)$/, '') || w;
-  }
+  const stripSuffix = w => w.replace(/(های|ها|هایی)$/, '') || w;
+  const meaningful = w => w !== null && !STOP.has(w) && !unitMap.has(w) && !(w in AMOUNT_WORDS);
 
   function analyzeSegment(seg) {
     const nums = seg.filter(t => t.n !== undefined).map(t => t.n);
-    let words = seg.filter(t => t.w).map(t => t.w);
+    const words = seg.filter(t => t.w).map(t => t.w);
     if (!words.length && !nums.length) return null;
 
-    // ۱) پیدا کردن غذا
-    let food = null;
-    let wArr = words.slice();
-    let m = findLongest(wArr, aliasMap, maxAliasLen);
-    if (!m) {
-      const stripped = wArr.map(stripSuffix);
-      m = findLongest(stripped, aliasMap, maxAliasLen);
-      if (m) wArr = stripped;
-    }
-    if (m) {
-      food = m.val;
+    // ۱) پیدا کردن همه غذاهای این بخش (مثلا «نان پنیر گردو»)
+    let wArr = words.map(stripSuffix).map((w, i) => aliasMap.has(words[i]) ? words[i] : w);
+    const found = [];
+    for (;;) {
+      const m = findLongest(wArr, aliasMap, maxAliasLen);
+      if (!m) break;
+      found.push({ food: m.val, pos: m.i });
       for (let k = m.i; k < m.i + m.len; k++) wArr[k] = null;
     }
 
-    // ۲) پیدا کردن واحد
+    // ۲) واحد
     let unit = null;
     const um = findLongest(wArr, unitMap, maxUnitLen);
     if (um) { unit = um.val; for (let k = um.i; k < um.i + um.len; k++) wArr[k] = null; }
 
-    const rest = wArr.filter(w => w !== null && !STOP.has(w) && !unitMap.has(w));
+    // ۳) مقدار تقریبی (کمی، زیاد…)
+    let amount = null;
+    for (const w of words) if (w in AMOUNT_WORDS) { amount = AMOUNT_WORDS[w]; break; }
+    const fried = words.some(w => FRIED_WORDS.includes(w));
 
-    if (!food && rest.length) {
-      food = fuzzyFood(rest.join(' '));
-      if (!food && rest.length > 1) for (const w of rest) { food = fuzzyFood(w); if (food) break; }
+    let rest = wArr.filter(meaningful);
+
+    if (!found.length && rest.length) {
+      let f = fuzzyFood(rest.join(' '));
+      if (!f && rest.length > 1) for (const w of rest) { f = fuzzyFood(w); if (f) { rest = rest.filter(x => x !== w); break; } }
+      else if (f) rest = [];
+      if (f) found.push({ food: f, pos: 0, fuzzy: true });
     }
+    found.sort((a, b) => a.pos - b.pos);
 
     let qty = nums.length ? nums[0] : null;
     if (nums.length >= 2 && seg.some(t => t.w === 'تا')) {
-      // «۲ تا ۳ عدد» → میانگین
       const idx = seg.findIndex(t => t.w === 'تا');
       if (seg[idx - 1] && seg[idx - 1].n !== undefined && seg[idx + 1] && seg[idx + 1].n !== undefined) {
         qty = (seg[idx - 1].n + seg[idx + 1].n) / 2;
@@ -217,13 +256,22 @@ const Parser = (() => {
       }
     }
 
-    return { food, qty, unit, rest, text: words.join(' ') };
+    return { found, qty, unit, amount, fried, rest, text: words.join(' ') };
   }
 
-  function gramsFor(food, qty, unit) {
+  const isFatty = f => (f.d === 'قاشق' || f.d === 'قاشق چایخوری') && f.u && f.u['قاشق چایخوری'];
+
+  function gramsFor(food, qty, unit, amount) {
+    if (amount && qty == null && !unit) {
+      // «کمی روغن» ≈ ۱ قاشق چایخوری، «یه ذره» ≈ نصف آن
+      if (isFatty(food) && (amount === 'little' || amount === 'tiny')) {
+        const q = amount === 'tiny' ? 0.5 : 1;
+        return { grams: q * food.u['قاشق چایخوری'], unit: 'قاشق چایخوری', qty: q };
+      }
+      qty = AMOUNT_FACTOR[amount];
+    }
     const q = qty == null ? 1 : qty;
     if (!unit) {
-      // «۲۰۰ مرغ» → احتمالاً گرم
       if (qty != null && qty >= 30 && food.d !== 'g') return { grams: q, unit: 'g', qty: q };
       unit = food.d || 'g';
     }
@@ -239,9 +287,7 @@ const Parser = (() => {
 
   function nutrientsFor(food, grams) {
     const k = grams / 100, n = food.n;
-    return {
-      kcal: n.kcal * k, p: n.p * k, c: n.c * k, f: n.f * k, fib: n.fib * k, sug: n.sug * k,
-    };
+    return { kcal: n.kcal * k, p: n.p * k, c: n.c * k, f: n.f * k, fib: n.fib * k, sug: n.sug * k };
   }
 
   function unitLabel(u) { return UNIT_LABELS[u] || u; }
@@ -249,39 +295,69 @@ const Parser = (() => {
   /** خروجی: { items: [...], unknown: [...] } */
   function parse(text) {
     const items = [], unknown = [];
-    const lines = String(text).split(/\n+/);
-    for (const line of lines) {
-      const segs = segmentize(tokenize(line));
-      let last = null;   // آخرین آیتم این خط (برای «تخم مرغ ۲ عدد»)
-      for (const seg of segs) {
+    for (const line of String(text).split(/\n+/)) {
+      let last = null;
+      for (const seg of segmentize(tokenize(line))) {
         const a = analyzeSegment(seg);
         if (!a) continue;
-        if (!a.food) {
-          // فقط مقدار بود → به غذای قبلی بچسبان
-          if (!a.rest.length && (a.qty != null || a.unit) && last && !last._explicit) {
-            Object.assign(last, buildItem(last.food, a.qty, a.unit, last.src + ' ' + a.text), { _explicit: true });
+        if (!a.found.length) {
+          // فقط مقدار بود → به غذای قبلی بچسبان («تخم مرغ ۲ عدد»، «روغن کم»)
+          if (!a.rest.length && (a.qty != null || a.unit || a.amount) && last && !last._explicit) {
+            const it = buildItem(last.food, a.qty, a.unit, last.src + ' ' + a.text, a.amount);
+            Object.assign(last, it, { _explicit: true });
             continue;
           }
           if (a.rest.length) unknown.push({ text: a.rest.join(' '), qty: a.qty, unit: a.unit });
           continue;
         }
-        const it = buildItem(a.food, a.qty, a.unit, a.text);
-        it._explicit = a.qty != null || !!a.unit;
-        items.push(it);
-        last = it;
+        let foundList = a.found;
+        // «ساندویچ کالباس» که دستورش نیست → نان ساندویچی + مخلوط
+        const sIdx = foundList.findIndex(f => f.food.name === 'ساندویچ');
+        if (sIdx >= 0 && foundList.length > 1) {
+          const bread = byName.get('نان باگت');
+          foundList = foundList.filter((_, i) => i !== sIdx).map(f => ({ ...f, sandwich: true }));
+          if (bread) foundList.unshift({ food: bread, bread: true });
+        }
+        foundList.forEach((f, i) => {
+          let it;
+          if (f.bread) it = buildItem(f.food, a.qty, null, a.text);
+          else if (f.sandwich) {
+            const g = (f.food.u && f.food.u['ساندویچ']) || GENERIC_UNIT_GRAMS['ساندویچ'];
+            it = buildItem(f.food, null, 'g', a.text, null, (a.qty || 1) * g);
+            it.label = describe(a.qty || 1, 'ساندویچ', f.food.name) ;
+          } else if (i === 0) it = buildItem(f.food, a.qty, a.unit, a.text, a.amount);
+          else it = buildItem(f.food, null, null, a.text, a.amount);
+          if (f.fuzzy) it.note = 'حدس زدم';
+          if (i === foundList.length - 1 && a.rest.length) it.ignored = a.rest.join(' ');
+          it._explicit = i === 0 && (a.qty != null || !!a.unit || !!a.amount);
+          items.push(it);
+          last = it;
+        });
+        // سرخ‌کردنی → روغن جذب‌شده (حدود ۸٪ وزن)
+        if (a.fried) {
+          const main = items[items.length - 1];
+          const oil = byName.get('روغن');
+          if (oil && !FRIED_FOOD_RE.test(norm(main.name))) {
+            const it = buildItem(oil, null, 'g', 'روغن سرخ کردن', null, Math.max(4, main.grams * 0.08));
+            it.label = `روغن جذب‌شده (${fmtQty(Math.round(it.grams))} گرم)`;
+            it.note = 'برای سرخ کردن ' + main.name;
+            items.push(it);
+          }
+        }
       }
     }
     items.forEach(i => delete i._explicit);
     return { items, unknown };
   }
 
-  function buildItem(food, qty, unit, src) {
-    const g = gramsFor(food, qty, unit);
+  function buildItem(food, qty, unit, src, amount, forceGrams) {
+    const g = forceGrams != null ? { grams: forceGrams, unit: 'g', qty: forceGrams } : gramsFor(food, qty, unit, amount);
     return {
       food, src,
       foodId: food.id, name: food.name,
       qty: g.qty, unit: g.unit, grams: Math.round(g.grams * 10) / 10,
       label: describe(g.qty, g.unit, food.name),
+      recipe: food.recipe || '',
       n: nutrientsFor(food, g.grams),
     };
   }
@@ -299,11 +375,8 @@ const Parser = (() => {
   function search(q) {
     const k = norm(q);
     if (!k) return foods.slice(0, 40);
-    const seen = new Set(), res = [];
-    for (const f of foods) {
-      if (seen.has(f)) continue;
-      if (f.aliases.some(a => norm(a).includes(k))) { res.push(f); seen.add(f); }
-    }
+    const res = [];
+    for (const f of foods) if (f.aliases.some(a => norm(a).includes(k))) res.push(f);
     return res.slice(0, 60);
   }
 

@@ -298,6 +298,7 @@
           <div class="entry-main">
             <div class="entry-title">${esc(entryLabel(e))}${e.manual ? ' <span class="tag warn">دستی</span>' : ''}</div>
             <div class="entry-sub">${fa(e.grams)} گرم · پروتئین ${fa(n.p, 1)} · کربو ${fa(n.c, 1)} · چربی ${fa(n.f, 1)} · فیبر ${fa(n.fib, 1)}${n.sug > 0.5 ? ` · قند ${fa(n.sug, 1)}` : ''}</div>
+            ${e.recipe ? `<div class="entry-sub">🧾 ${esc(e.recipe)}</div>` : ''}
             ${e.note ? `<div class="entry-note">📝 ${esc(e.note)}</div>` : ''}
           </div>
           <div class="entry-kcal">${fa(n.kcal)} <small>کالری</small></div>
@@ -311,6 +312,7 @@
   }
 
   function entryLabel(e) {
+    if (e.label && Math.abs(e.grams - e.ug) < 0.01) return e.label;
     if (e.unit === 'g') return `${fa(e.grams)} گرم ${e.name}`;
     const q = e.grams / e.ug;
     const qs = Math.abs(q - 0.5) < 0.01 ? 'نیم' : fa(Math.round(q * 100) / 100, 1);
@@ -329,7 +331,12 @@
   function previewHTML(p) {
     let html = '';
     for (const it of p.items) {
-      html += `<div class="pv-item"><span>✓ ${esc(it.label)} <span class="muted small">(${fa(it.grams)}g)</span></span><span class="pv-n">${fa(it.n.kcal)} کالری · ${fa(it.n.p, 1)}g پروتئین</span></div>`;
+      const extra = [
+        it.recipe ? `<div class="pv-sub">🧾 ${esc(it.recipe)}</div>` : '',
+        it.note ? `<div class="pv-sub">ℹ️ ${esc(it.note)}</div>` : '',
+        it.ignored ? `<div class="pv-sub warn">⚠️ «${esc(it.ignored)}» حساب نشد — اگر غذاست جدا بنویس یا تعریفش کن</div>` : '',
+      ].join('');
+      html += `<div class="pv-item"><div><div>✓ ${esc(it.label)} <span class="muted small">(${fa(it.grams)}g)</span></div>${extra}</div><span class="pv-n">${fa(it.n.kcal)} کالری · ${fa(it.n.p, 1)}g پروتئین</span></div>`;
     }
     p.unknown.forEach((u, i) => {
       html += `<div class="pv-item pv-unknown"><span>❓ «${esc(u.text)}» را نشناختم</span><button data-u="${i}">تعریف کن</button></div>`;
@@ -359,6 +366,7 @@
       id: uid(), name: it.name, foodId: it.foodId, src: it.src,
       unit: it.unit, ug: it.qty ? it.grams / it.qty : it.grams, grams: it.grams,
       per: { ...it.food.n }, meal: mealId, mts, ts: Date.now(),
+      ...(it.recipe ? { recipe: it.recipe } : {}), ...(it.label.startsWith('روغن جذب') ? { label: it.label } : {}),
     };
   }
 
