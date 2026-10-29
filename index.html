@@ -53,13 +53,8 @@
         <div class="card macros" id="macros"></div>
 
         <div class="card input-card">
-          <div class="meal-tabs" id="mealTabs">
-            <button data-meal="breakfast">صبحانه</button>
-            <button data-meal="lunch">ناهار</button>
-            <button data-meal="snack">میان‌وعده</button>
-            <button data-meal="dinner">شام</button>
-          </div>
-          <textarea id="foodInput" rows="2" placeholder="چی خوردی؟ مثلا: ۵ عدد سفیده تخم مرغ، یک عدد زرده، یک اسکوپ وی، ۸ قاشق برنج"></textarea>
+          <div class="meal-tabs" id="mealTabs"></div>
+          <textarea id="foodInput" rows="2" placeholder="چی خوردی؟ مثلا: ۵ عدد سفیده تخم مرغ، یک عدد زرده، یک اسکوپ وی، ۸ قاشق برنج (هر خط یا ویرگول = یک غذا)"></textarea>
           <div class="preview" id="preview"></div>
           <div class="input-actions">
             <div class="chips" id="recentChips"></div>
@@ -95,9 +90,17 @@
       <!-- ── تنظیمات ── -->
       <section class="view" id="view-settings">
         <div class="card">
-          <h3>اهداف روزانه</h3>
-          <div class="form-grid" id="targetsForm"></div>
+          <div class="row-between">
+            <h3>اهداف روزانه</h3>
+            <button class="btn ghost small" id="resetTargets">پیش‌فرض</button>
+          </div>
+          <div id="targetsForm"></div>
           <p class="muted small" id="fatNote"></p>
+        </div>
+        <div class="card">
+          <h3>مشخصات بدن</h3>
+          <p class="small" id="profileLine"></p>
+          <button class="btn primary" id="calcBtn" style="width:100%">🧮 محاسبه علمی اهداف بر اساس بدن من</button>
         </div>
         <div class="card">
           <div class="row-between">
@@ -120,7 +123,7 @@
           </div>
           <button class="btn danger-text" id="wipeBtn">پاک کردن همه اطلاعات</button>
         </div>
-        <p class="muted small center">مقادیر تغذیه‌ای تقریبی هستند. نسخه ۱</p>
+        <p class="muted small center">مقادیر تغذیه‌ای تقریبی هستند. نسخه ۲</p>
       </section>
     </main>
 
