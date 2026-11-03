@@ -1,5 +1,5 @@
 // کش آفلاین: نسخه کش را با هر تغییر بالا ببر
-const CACHE = 'diet-v3';
+const CACHE = 'diet-v4';
 const ASSETS = [
   './', './index.html', './styles.css', './manifest.webmanifest',
   './js/foods.js', './js/parser.js', './js/app.js',

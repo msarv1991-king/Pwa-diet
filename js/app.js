@@ -105,7 +105,10 @@
     else if (t.kcal > calMax()) cal = 1 - (t.kcal - calMax()) / 600;
     else cal = 1;
     const p = g.p ? t.p / g.p : 1;
-    const c = t.c <= g.c ? 1 : 1 - (t.c - g.c) / Math.max(g.c, 25);
+    // کربو: ۷۰٪ تا ۱۱۰٪ هدف امتیاز کامل؛ کمتر از آن کم‌کم کم می‌شود (صفر کربو = ۴۰٪ امتیاز)،
+    // بیشتر از آن تا دو برابر هدف به صفر می‌رسد
+    const cr = g.c ? t.c / g.c : 1;
+    const c = cr < .7 ? .4 + .6 * cr / .7 : cr <= 1.1 ? 1 : 1 - (cr - 1.1) / .9;
     // چربی: ±۱۵٪ هدف کامل، تا ±۶۰٪ به صفر می‌رسد
     const fd = g.f ? Math.abs(t.f - g.f) / g.f : 0;
     const f = fd <= 0.15 ? 1 : 1 - (fd - 0.15) / 0.45;
@@ -220,7 +223,7 @@
 
     $('#macros').innerHTML = [
       macroRow('پروتئین', 'var(--c-protein)', t.p, g.p, 'min'),
-      macroRow('کربوهیدرات', 'var(--c-carb)', t.c, g.c, 'max'),
+      macroRow('کربوهیدرات', 'var(--c-carb)', t.c, g.c, 'carb'),
       macroRow('چربی', 'var(--c-fat)', t.f, g.f, 'around'),
       macroRow('فیبر', 'var(--c-fiber)', t.fib, g.fib, 'min'),
       macroRow('قند', 'var(--c-sugar)', t.sug, g.sug, 'zero'),
@@ -243,6 +246,11 @@
       ratio = target ? val / target : 0;
       if (ratio <= 1) tag = `<span class="tag good">${fa(target - val)} جا داری</span>`;
       else { tag = `<span class="tag ${ratio <= 1.2 ? 'warn' : 'bad'}">${fa(val - target)} اضافه</span>`; barColor = 'var(--bad)'; }
+    } else if (mode === 'carb') {
+      ratio = target ? val / target : 0;
+      if (ratio < .7) tag = `<span class="tag warn">${fa(target - val)} تا هدف</span>`;
+      else if (ratio <= 1.1) tag = `<span class="tag good">✓ در هدف</span>`;
+      else { tag = `<span class="tag ${ratio <= 1.3 ? 'warn' : 'bad'}">${fa(val - target)} اضافه</span>`; barColor = 'var(--bad)'; }
     } else if (mode === 'around') {
       ratio = target ? val / target : 0;
       if (ratio < .85) tag = `<span class="tag warn">${fa(target - val)} مانده</span>`;
@@ -417,7 +425,7 @@
     if (!entries.length) {
       box.innerHTML = `<h3>🎯 هدف روزانه</h3><div class="insights">
         <div class="ins"><span class="ic">🔥</span><span>کالری <b>${fa(g.kcal)}</b> تا <b>${fa(calMax())}</b></span></div>
-        <div class="ins"><span class="ic">💪</span><span>پروتئین <b>${fa(g.p)}</b> · کربو حداکثر <b>${fa(g.c)}</b> · چربی <b>${fa(g.f)}</b> · فیبر <b>${fa(g.fib)}</b> گرم</span></div>
+        <div class="ins"><span class="ic">💪</span><span>پروتئین <b>${fa(g.p)}</b> · کربو <b>${fa(g.c)}</b> · چربی <b>${fa(g.f)}</b> · فیبر <b>${fa(g.fib)}</b> گرم</span></div>
         <div class="ins"><span class="ic">🚫</span><span>قند <b>${g.sug ? fa(g.sug) + ' گرم' : 'صفر'}</b></span></div>
         ${tipOfDay()}
       </div>`;
@@ -426,15 +434,24 @@
     const closed = isClosed(cur);
     const sc = scoreOf(t);
     const gr = grade(sc.total);
+    const used = {
+      cal: `${fa(t.kcal)} از ${fa(g.kcal)}–${fa(calMax())} کالری`,
+      p: `${fa(t.p)} از ${fa(g.p)} گرم`,
+      c: `${fa(t.c)} از ${fa(g.c)} گرم (بازه ${fa(g.c * .7)}–${fa(g.c * 1.1)})`,
+      f: `${fa(t.f)} از ${fa(g.f)} گرم`,
+      fib: `${fa(t.fib)} از ${fa(g.fib)} گرم`,
+      sug: `${fa(t.sug, 1)} گرم — هدف ${g.sug ? fa(g.sug) : 'صفر'}`,
+    };
     const breakdown = Object.keys(SCORE_MAX).map(k => {
       const v = sc.parts[k], m = SCORE_MAX[k], r = v / m;
       const col = r >= .9 ? 'var(--good)' : r >= .6 ? 'var(--warn)' : 'var(--bad)';
-      return `<div class="sb-row"><span>${SCORE_NAMES[k]}</span><div class="bar"><div style="width:${r * 100}%;background:${col}"></div></div><b>${fa(v)}<span class="muted">/${fa(m)}</span></b></div>`;
+      return `<div class="sb-row"><span>${SCORE_NAMES[k]}<small>${used[k]}</small></span><div class="bar"><div style="width:${r * 100}%;background:${col}"></div></div><b>${fa(v)}<span class="muted">/${fa(m)}</span></b></div>`;
     }).join('');
 
     const head = closed
       ? `<div class="final-score" style="--c:${gr.color}"><div class="fs-num">${fa(sc.total)}<small>/۱۰۰</small></div><div><b>${gr.emoji} کارنامه پایان روز: ${gr.label}</b><div class="small muted">${fa(t.kcal)} کالری · ${fa(t.p)}g پروتئین · ${fa(mealsOf(entries).length)} وعده</div></div></div>`
-      : `<div class="row-between"><h3>📋 کارنامه تا این لحظه</h3><button class="btn ghost small" id="closeDayBtn">پایان روز ✓</button></div>`;
+      : `<div class="row-between"><h3>📋 کارنامه تا این لحظه</h3><button class="btn ghost small" id="closeDayBtn">پایان روز ✓</button></div>
+         <p class="small muted" style="margin:4px 0 0">امتیاز موقت است و با هر وعده تغییر می‌کند؛ امتیاز نهایی را «پایان روز» نشان می‌دهد.</p>`;
 
     const tips = dayTips(entries, t, closed);
     box.innerHTML = `${head}
@@ -480,8 +497,10 @@
     else if (goodP >= 3) add('good', '⏱️', `${fa(goodP)} وعده با ۲۵+ گرم پروتئین — پخش پروتئین عالی بود.`);
 
     // کربو
-    if (t.c > g.c) add('bad', '🍞', `کربوهیدرات ${fa(t.c - g.c)} گرم بیش از حد.${topSources(entries, 'c')}`);
-    else if (closed) add('good', '🍞', `کربو در حد مجاز ماند (${fa(t.c)} از ${fa(g.c)}). کربوی محدود را بهتر است نزدیک تمرین بخوری.`);
+    if (t.c > g.c * 1.1) add('bad', '🍞', `کربوهیدرات ${fa(t.c - g.c)} گرم بیش از هدف.${topSources(entries, 'c')}`);
+    else if (t.c >= g.c * .7) add('good', '🍞', `کربو در محدوده هدف (${fa(t.c)} از ${fa(g.c)} گرم). بهترین زمانش نزدیک تمرین است.`);
+    else if (closed) add('warn', '🍞', `کربو فقط ${fa(t.c)} گرم بود (هدف ${fa(g.c)}). کم‌کربوی شدید مشکلی برای چربی‌سوزی ندارد، ولی کمی کربوی پرفیبر (جو دوسر، حبوبات، سبزیجات) قبل از تمرین به انرژی و حفظ عملکرد کمک می‌کند.`);
+    else add('', '🍞', `${fa(g.c - t.c)} گرم کربو تا هدف مانده؛ ترجیحاً از منابع پرفیبر و نزدیک تمرین.`);
 
     // چربی
     const fatMin = Math.max(w ? 0.5 * w : 0, (t.kcal * 0.2) / 9);
@@ -552,6 +571,12 @@
         kcal += veg * 0.3; carbs += veg * 0.06;
       }
     }
+    const cGap = g.c * .7 - t.c - carbs;
+    if (cGap > 8) {
+      const oat = Math.max(1, Math.round((g.c - t.c - carbs) / 6.6));
+      items.push(`<b>${fa(oat)} قاشق جو دوسر</b> (≈${fa(oat * 6.6)}g کربو، ${fa(oat)}g فیبر) — یا ${fa(Math.round((g.c - t.c - carbs) / 5.6))} قاشق برنج؛ ترجیحاً قبل یا بعد از تمرین`);
+      kcal += oat * 39; carbs += oat * 6.6; fat += oat * 0.7;
+    }
     const fatRoom = g.f - t.f - fat;
     const rest = g.kcal - t.kcal - kcal;
     if (rest > 60 && fatRoom > 5) {
@@ -562,7 +587,7 @@
     }
     if (!items.length) return t.kcal >= g.kcal ? `<div class="plan"><h4>🧭 جمع‌بندی</h4><ul><li>روز متعادلی بود. «پایان روز» را بزن تا کارنامه نهایی را ببینی. ✨</li></ul></div>` : '';
     const total = t.kcal + kcal;
-    const foot = `<li class="small muted">جمع پیش‌بینی: حدود ${fa(total)} کالری${total > calMax() ? ' — بیشتر از سقف؛ مقدار چربی را کمتر کن.' : ''}${g.c - t.c - carbs < 0 ? ' — کربو از حد گذشته، نان و برنج را حذف کن.' : ''}</li>`;
+    const foot = `<li class="small muted">جمع پیش‌بینی: حدود ${fa(total)} کالری${total > calMax() ? ' — بیشتر از سقف؛ مقدار چربی را کمتر کن.' : ''}${t.c + carbs > g.c * 1.1 ? ' — کربو از هدف می‌گذرد، نان و برنج را حذف کن.' : ''}</li>`;
     return `<div class="plan"><h4>🧭 پیشنهاد برای تکمیل امروز</h4><ul>${items.map(i => `<li>${i}</li>`).join('')}${foot}</ul></div>`;
   }
 
@@ -872,7 +897,7 @@
     const tiles = [
       ['کالری', 'var(--accent)', avgOf('kcal'), '', `${fa(cnt(t => t.kcal >= g.kcal && t.kcal <= calMax()))} روز در محدوده`],
       ['پروتئین', 'var(--c-protein)', avgOf('p'), 'g', `${fa(cnt(t => t.p >= g.p * .95))} روز به هدف رسید`],
-      ['کربوهیدرات', 'var(--c-carb)', avgOf('c'), 'g', `${fa(cnt(t => t.c <= g.c))} روز زیر ${fa(g.c)}`],
+      ['کربوهیدرات', 'var(--c-carb)', avgOf('c'), 'g', `${fa(cnt(t => t.c >= g.c * .7 && t.c <= g.c * 1.1))} روز در محدوده هدف`],
       ['چربی', 'var(--c-fat)', avgOf('f'), 'g', `هدف: ${fa(g.f)} گرم`],
       ['فیبر', 'var(--c-fiber)', avgOf('fib'), 'g', `${fa(cnt(t => t.fib >= g.fib * .95))} روز به هدف رسید`],
       ['قند', 'var(--c-sugar)', avgOf('sug'), 'g', `${fa(cnt(t => t.sug <= g.sug + 2))} روز بدون قند`],
@@ -905,7 +930,7 @@
       if (metric === 'score') return grade(v).color;
       if (metric === 'kcal') return v >= g.kcal && v <= calMax() ? 'var(--good)' : v > calMax() ? 'var(--bad)' : 'var(--warn)';
       if (metric === 'p' || metric === 'fib') return v >= g[metric] * .95 ? 'var(--good)' : 'var(--warn)';
-      if (metric === 'c') return v <= g.c ? 'var(--good)' : 'var(--bad)';
+      if (metric === 'c') return v > g.c * 1.1 ? 'var(--bad)' : v >= g.c * .7 ? 'var(--good)' : 'var(--warn)';
       if (metric === 'f') return Math.abs(v - g.f) <= g.f * .15 ? 'var(--good)' : 'var(--warn)';
       return v <= g.sug + 2 ? 'var(--good)' : 'var(--bad)';
     };
@@ -997,7 +1022,7 @@
     switch (k) {
       case 'p': return `میانگین ${fa(avg('p'))} گرم در روز؛ روزانه ${fa(Math.max(0, g.p - avg('p')))} گرم بیشتر لازم است — مثلا یک وعده سینه مرغ یا ۱ اسکوپ وی اضافه.`;
       case 'fib': return `میانگین ${fa(avg('fib'))} گرم؛ سبزیجات بیشتر، تخم چیا یا کتان اضافه کن.`;
-      case 'c': return `میانگین ${fa(avg('c'))} گرم؛ نان و برنج را کم کن و سبزیجات جایگزین کن.`;
+      case 'c': return avg('c') > g.c ? `میانگین ${fa(avg('c'))} گرم؛ نان و برنج را کم کن و سبزیجات جایگزین کن.` : `میانگین ${fa(avg('c'))} گرم؛ کمتر از هدف ${fa(g.c)}. کربوی پرفیبر (جو دوسر، حبوبات) نزدیک تمرین اضافه کن.`;
       case 'f': return `میانگین ${fa(avg('f'))} گرم در برابر هدف ${fa(g.f)}؛ منابع چربی را با ترازو اندازه بگیر (روغن خیلی سریع کالری می‌آورد).`;
       case 'sug': return `میانگین ${fa(avg('sug'), 1)} گرم؛ میوه شیرین، نوشابه، شکر و آبمیوه را حذف کن.`;
       case 'cal': return `میانگین ${fa(avg('kcal'))} کالری؛ سعی کن هر روز بین ${fa(g.kcal)} و ${fa(calMax())} بمانی.`;
@@ -1053,7 +1078,7 @@
   const TARGET_FIELDS = [
     ['kcal', 'کالری روزانه', 'کالری', 50],
     ['p', 'پروتئین', 'گرم', 5],
-    ['c', 'کربوهیدرات (حداکثر)', 'گرم', 5],
+    ['c', 'کربوهیدرات', 'گرم', 5],
     ['f', 'چربی', 'گرم', 5],
     ['fib', 'فیبر', 'گرم', 1],
     ['sug', 'قند (حداکثر)', 'گرم', 1],
